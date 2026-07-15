@@ -4,11 +4,11 @@
 
     <div class="chat-window">
       <div class="message-content" ref="containerRef">
-        <div v-if="!renderedHtml && !isStreaming" class="placeholder">
+        <div v-if="!msg.markdown && !isStreaming" class="placeholder">
           点击下方按钮开始模拟流式接收
         </div>
-        <div v-if="renderedHtml" v-html="renderedHtml"></div>
-        <div v-if="isStreaming && !renderedHtml" class="placeholder">
+        <div v-if="msg.markdown" v-html="renderedHtml()"></div>
+        <div v-if="isStreaming && !msg.markdown" class="placeholder">
           接收中...
         </div>
       </div>
@@ -37,11 +37,12 @@
 <script setup>
 // ============================================================
 // 🤖 假设这是你现有的智能体对话组件
-//    把 useVegaMarkdown 复制到项目里，接上你的流式逻辑即可
+//    在你的正常逻辑里，只需加两行代码（看 👇 标记处）
 // ============================================================
 
-import { ref, watch } from 'vue'
-import { useVegaMarkdown } from './composables/useVegaMarkdown'
+import { ref, nextTick } from 'vue'
+import { marked } from 'marked'
+import { processVegaCharts, mountVegaCharts } from './composables/vegaChartHelper'
 
 // ---- 1. 定义你的图表映射 ----
 const barMap = {
@@ -89,18 +90,22 @@ const barMap = {
   },
 }
 
-// ---- 2. 初始化 composable ----
-const { renderedHtml, containerRef, isStreaming, appendChunk, flush, reset } =
-  useVegaMarkdown(barMap)
-
-// ---- 3. 模拟流式输入（替换成你真实的 websocket/SSE 逻辑） ----
+// ---- 2. 你的正常逻辑（模拟） ----
+const containerRef = ref(null)
+const msg = ref({ markdown: '' })   // 👈 这就是你的 msg.markdown
+const isStreaming = ref(false)
 const error = ref('')
 const log = ref('')
 
-// 监听 containerRef，确保 useVegaMarkdown 内部能找到 DOM
-watch(containerRef, (el) => {
-  if (el) log.value = 'DOM 就绪'
-})
+// 把 msg.markdown 渲染成 HTML（你的正常逻辑）
+function renderedHtml() {
+  const processed = processVegaCharts(barMap, msg.value.markdown)  // 👈 就这一行！
+  try {
+    return marked.parse(processed) || ''
+  } catch {
+    return marked(processed) || ''
+  }
+}
 
 const fullStreamText = [
   '## 销售数据报告\n\n',
@@ -121,17 +126,23 @@ let streamTimer = null
 function startStream() {
   error.value = ''
   log.value = '开始接收...'
-  reset()
+  msg.value.markdown = ''
+  isStreaming.value = true
 
   let index = 0
   function push() {
     if (index >= fullStreamText.length) {
-      flush()
+      isStreaming.value = false
       log.value = '接收完成'
       return
     }
-    // 👇 这就是你现有的流式处理逻辑要改的那一行
-    appendChunk(fullStreamText[index])
+
+    // 👇 你的正常流式逻辑（msg.markdown += chunk）
+    msg.value.markdown += fullStreamText[index]
+
+    // 👇 加这一行，挂载 Vega 图表
+    nextTick(() => mountVegaCharts(barMap, containerRef.value))
+
     index++
     streamTimer = setTimeout(push, 600)
   }
@@ -140,7 +151,8 @@ function startStream() {
 
 function doReset() {
   clearTimeout(streamTimer)
-  reset()
+  msg.value.markdown = ''
+  isStreaming.value = false
   error.value = ''
   log.value = ''
 }
